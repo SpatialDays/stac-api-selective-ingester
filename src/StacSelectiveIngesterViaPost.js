@@ -7,9 +7,7 @@ class StacSelectiveIngesterViaPost {
     startUrl,
     startBody,
     targetStacApiUrl,
-    update = false,
-    callbackUrl = undefined,
-    callbackId = undefined
+    update = false
   ) {
     // remove trailing slash if it exists on sourceApiUrl
     if (sourceApiUrl.endsWith("/")) {
@@ -23,12 +21,6 @@ class StacSelectiveIngesterViaPost {
       targetStacApiUrl = targetStacApiUrl.slice(0, -1);
     }
     this.update = update;
-    this.callbackUrl = callbackUrl;
-    // if callbackUrl ends with slash, remove it
-    if (this.callbackUrl && this.callbackUrl.endsWith("/")) {
-      this.callbackUrl = this.callbackUrl.slice(0, -1);
-    }
-    this.callbackId = callbackId;
     this.startBody = startBody;
     this.processedCollections = [];
     this.newlyStoredCollectionsCount = 0;
@@ -54,19 +46,6 @@ class StacSelectiveIngesterViaPost {
     return data;
   }
 
-  async _reportProgressToEndpont() {
-    if (this.callbackUrl) {
-      console.log("Reporting progress to endpoint: ", this.callbackUrl);
-    }
-    const data = this._make_report();
-    if (this.callbackUrl) {
-      try {
-        await axios.post(this.callbackUrl, data);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-  }
   async getAllItems() {
     let itemsUrl = this.startUrl;
     let itemsBody = this.startBody;
@@ -95,10 +74,10 @@ class StacSelectiveIngesterViaPost {
         const sourceStacApiCollectionUrl = item.links.find(
           (link) => link.rel === "collection"
         ).href;
-        await this._storeCollectionOnTargetStacApi(sourceStacApiCollectionUrl);
+        await this._storeCollectionIntoTargetStacApi(sourceStacApiCollectionUrl);
         let collectionId = sourceStacApiCollectionUrl.split("/").pop();
         collectionUtils.removeRelsFromLinks(item);
-        await this._storeItemInBigStack(item, collectionId);
+        await this._storeItemIntoTargetStacApi(item, collectionId);
       }
       const nextItemSetLink = data.links.find((link) => link.rel === "next");
       if (nextItemSetLink) {
@@ -111,20 +90,11 @@ class StacSelectiveIngesterViaPost {
         break;
       }
     }
-    this._reportProgressToEndpont();
     return this._make_report();
   }
 
-  async _checkCollectionExistsOnTargetStacApi(collectionId) {
-    try {
-      await axios.get(`${this.targetStacApiUrl}/collections/${collectionId}`);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
 
-  async _storeCollectionOnTargetStacApi(sourceStacApiCollectionUrl) {
+  async _storeCollectionIntoTargetStacApi(sourceStacApiCollectionUrl) {
     if (this.processedCollections.includes(sourceStacApiCollectionUrl)) {
       return;
     }
@@ -155,7 +125,7 @@ class StacSelectiveIngesterViaPost {
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  async _storeItemInBigStack(item, collectionId) {
+  async _storeItemIntoTargetStacApi(item, collectionId) {
     return new Promise(async (resolve, reject) => {
       console.log("Storing item: ", item.id);
       const itemsEndpoint =

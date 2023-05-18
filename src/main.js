@@ -11,22 +11,19 @@ app.post(
     let body = req.body;
     let sourceStacApiUrl = body.source_stac_catalog_url;
     if (!sourceStacApiUrl) {
-      return res.status(400).send({error:"source_stac_catalog_url not found in body"});
+      return res.status(400).send({ error: "source_stac_catalog_url not found in body" });
     }
-    // if sourceStacApiUrl ends with a slash, remove it
     if (sourceStacApiUrl.endsWith("/")) {
       sourceStacApiUrl = sourceStacApiUrl.slice(0, -1);
     }
-
     delete body.source_stac_catalog_url;
     console.log("Source stac api url: ", sourceStacApiUrl);
     let targetStacApiUrl = body.target_stac_catalog_url;
     if (!targetStacApiUrl) {
-      return res.status(400).send({error:"target_stac_catalog_url not found in body"});
+      return res.status(400).send({ error: "target_stac_catalog_url not found in body" });
     }
     delete body.target_stac_catalog_url;
     console.log("Target stac api url: ", targetStacApiUrl);
-    // if targetStacApiUrl ends with a slash, remove it
     if (targetStacApiUrl.endsWith("/")) {
       targetStacApiUrl = targetStacApiUrl.slice(0, -1);
     }
@@ -36,11 +33,6 @@ app.post(
     }
     delete body.update;
     console.log("Update flag: ", update);
-    let callbackEndpoint = body.callback_endpoint;
-    delete body.callback_endpoint;
-    console.log("Callback endpoint: ", callbackEndpoint);
-    let callbackId = body.callback_id;
-    delete body.callback_id;
     const url = `${sourceStacApiUrl}/search`;
     body.limit = 100;
 
@@ -50,9 +42,7 @@ app.post(
         url,
         body,
         targetStacApiUrl,
-        update,
-        callbackEndpoint,
-        callbackId
+        update
       );
     try {
       const result = await stacSelectiveIngester.getAllItems();
