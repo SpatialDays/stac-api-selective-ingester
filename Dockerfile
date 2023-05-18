@@ -1,10 +1,7 @@
-FROM node:16
-WORKDIR /usr/src/app
-RUN apt-get update -y
-RUN apt-get upgrade -y
+FROM python:3.8
+WORKDIR /app
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt
 COPY . .
-RUN npm install
-RUN npm ci --only=production
-ENV STAC_SELECTIVE_INGESTER_PORT=80
-EXPOSE 80/tcp
-CMD node src/main.js
+# cmd gunicorn stac_validator:app on port 80
+CMD ["gunicorn", "stac_validator:app" ,"--bind", "0.0.0.0:80"] 

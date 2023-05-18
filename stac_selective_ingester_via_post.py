@@ -1,0 +1,175 @@
+import time
+import requests
+import os
+
+class StacSelectiveIngesterViaPost:
+    def __init__(
+        self, source_api_url, start_url, start_body, target_stac_api_url, update=False
+    ):
+        if source_api_url.endswith("/"):
+            source_api_url = source_api_url[:-1]
+        self.source_api_url = source_api_url
+        self.start_url = start_url
+        if target_stac_api_url.endswith("/"):
+            target_stac_api_url = target_stac_api_url[:-1]
+        self.target_stac_api_url = target_stac_api_url
+        self.update = update
+        self.start_body = start_body
+        self.processed_collections = []
+        self.newly_stored_collections_count = 0
+        self.newly_stored_collections = []
+        self.updated_collections_count = 0
+        self.updated_collections = []
+        self.newly_added_items_count = 0
+        self.updated_items_count = 0
+        self.items_already_present_count = 0
+
+    def _make_report(self):
+        data = {
+            "newly_stored_collections_count": self.newly_stored_collections_count,
+            "newly_stored_collections": self.newly_stored_collections,
+            "updated_collections_count": self.updated_collections_count,
+            "updated_collections": self.updated_collections,
+            "newly_stored_items_count": self.newly_added_items_count,
+            "updated_items_count": self.updated_items_count,
+            "already_stored_items_count": self.items_already_present_count,
+        }
+        return data
+
+    def get_all_items(self):
+        items_url = self.start_url
+        items_body = self.start_body
+        while items_url:
+            response = None
+            for i in range(5):
+                try:
+                    response = requests.post(items_url, json=items_body)
+                    response.raise_for_status()
+                    break
+                except requests.exceptions.RequestException as error:
+                    time.sleep(1)
+                    if i < 4:
+                        print("Retrying...")
+                        continue
+                    raise error
+            items_url = None
+            items_body = None
+            data = response.json()
+            features = data["features"]
+            for item in features:
+                source_stac_api_collection_url = next(
+                    (
+                        link["href"]
+                        for link in item["links"]
+                        if link["rel"] == "collection"
+                    ),
+                    None,
+                )
+                if source_stac_api_collection_url:
+                    self._store_collection_into_target_stac_api(
+                        source_stac_api_collection_url
+                    )
+                    collection_id = source_stac_api_collection_url.split("/")[-1]
+                    self._remove_rels_from_links(item)
+                    self._store_item_into_target_stac_api(item, collection_id)
+            next_item_set_link = next(
+                (
+                    link
+                    for link in data.get("links", [])
+                    if link["rel"] == "next"
+                ),
+                None,
+            )
+            if next_item_set_link:
+                items_url = next_item_set_link["href"]
+                items_body = next_item_set_link["body"]
+                print("Getting next page...", items_url)
+                print(json.dumps(items_body, indent=4))
+            else:
+                print("Stopping at last page.")
+                break
+        return self._make_report()
+
+    def _store_collection_into_target_stac_api(self, source_stac_api_collection_url):
+        if source_stac_api_collection_url in self.processed_collections:
+            return
+        collection_response = requests.get(source_stac_api_collection_url)
+        collection = collection_response.json()
+        self._add_provider_to_collection(collection)
+        self._remove_rels_from_links(collection)
+        collections_endpoint = f"{self.target_stac_api_url}/collections"
+        try:
+            response = requests.post(collections_endpoint, json=collection)
+            response.raise_for_status()
+            print("Stored collection:", response.json()["id"])
+            self.newly_stored_collections_count += 1
+            self.newly_stored_collections.append(source_stac_api_collection_url)
+        except requests.exceptions.HTTPError as error:
+            if (
+                error.response
+                and error.response.json().get("code") == "ConflictError"
+            ):
+                print(
+                    f"Collection {collection['id']} already exists."
+                )
+                response = requests.put(collections_endpoint, json=collection)
+                response.raise_for_status()
+                print("Updated collection:", response.json()["id"])
+                self.updated_collections_count += 1
+                self.updated_collections.append(source_stac_api_collection_url)
+            else:
+                print(f"Error storing collection {collection['id']}: {error}")
+        self.processed_collections.append(source_stac_api_collection_url)
+
+    def _store_item_into_target_stac_api(self, item, collection_id):
+        items_endpoint = f"{self.target_stac_api_url}/collections/{collection_id}/items"
+        try:
+            response = requests.post(items_endpoint, json=item)
+            response.raise_for_status()
+            print("Stored item:", response.json()["id"])
+            self.newly_added_items_count += 1
+            return f"Stored item: {response.json()['id']}"
+        except requests.exceptions.HTTPError as error:
+            if (
+                error.response
+                and error.response.json().get("code") == "ConflictError"
+            ):
+                if not self.update:
+                    print(f"Item {item['id']} already exists.")
+                    self.items_already_present_count += 1
+                    return f"Item {item['id']} already exists."
+                else:
+                    response = requests.put(
+                        f"{items_endpoint}/{item['id']}", json=item
+                    )
+                    response.raise_for_status()
+                    self.updated_items_count += 1
+                    print("Updated item:", response.json()["id"])
+                    return f"Updated item: {response.json()['id']}"
+            else:
+                print(f"Error storing item {item['id']}: {error}")
+                raise error
+
+    @staticmethod
+    def _add_provider_to_collection(collection):
+        set_provider = (
+            os.getenv("STAC_API_SELECTIVE_INGESTER_PROVIDER_SET_HOST_PROVIDER") or True
+        )
+        if set_provider:
+            collection["providers"].append(
+                {
+                    "name": os.getenv("STAC_API_SELECTIVE_INGESTER_PROVIDER_NAME")
+                    or "Spatial Days",
+                    "url": os.getenv("STAC_API_SELECTIVE_INGESTER_PROVIDER_URL")
+                    or "https://spatialdays.com/",
+                    "roles": ["host"],
+                }
+            )
+
+
+    @staticmethod
+    def _remove_rels_from_links(collection):
+        refs_to_remove = ["items", "parent", "root", "self", "collection"]
+        collection["links"] = [
+            link for link in collection["links"] if link["rel"] not in refs_to_remove
+        ]
