@@ -1,0 +1,10 @@
+{
+  "source_stac_catalog_url": "https://earth-search.aws.element84.com/v0/",
+  "target_stac_catalog_url": "http://localhost:8080",
+  "update": true,
+  "stac_search_parameters": {
+    "bbox": [-1, 50, 1, 51],
+    "datetime": "2022-04-04T00:00:00Z/2022-05-05T00:00:00Z",
+    "collections": ["sentinel-s2-l2a"]
+  }
+}

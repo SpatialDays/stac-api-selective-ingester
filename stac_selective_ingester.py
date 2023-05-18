@@ -1,18 +1,19 @@
 import time
 import requests
 import os
+import logging
+import json
+from urllib.parse import urljoin, urlparse
 
-class StacSelectiveIngesterViaPost:
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class StacSelectiveIngester:
     def __init__(
         self, source_api_url, start_url, start_body, target_stac_api_url, update=False
     ):
-        if source_api_url.endswith("/"):
-            source_api_url = source_api_url[:-1]
-        self.source_api_url = source_api_url
+        self.source_api_url = source_api_url.rstrip("/")
         self.start_url = start_url
-        if target_stac_api_url.endswith("/"):
-            target_stac_api_url = target_stac_api_url[:-1]
-        self.target_stac_api_url = target_stac_api_url
+        self.target_stac_api_url = target_stac_api_url.rstrip("/")
         self.update = update
         self.start_body = start_body
         self.processed_collections = []
@@ -49,7 +50,7 @@ class StacSelectiveIngesterViaPost:
                 except requests.exceptions.RequestException as error:
                     time.sleep(1)
                     if i < 4:
-                        print("Retrying...")
+                        logging.info("Retrying...")
                         continue
                     raise error
             items_url = None
@@ -81,12 +82,12 @@ class StacSelectiveIngesterViaPost:
                 None,
             )
             if next_item_set_link:
-                items_url = next_item_set_link["href"]
+                items_url = urljoin(self.source_api_url, next_item_set_link["href"])
                 items_body = next_item_set_link["body"]
-                print("Getting next page...", items_url)
-                print(json.dumps(items_body, indent=4))
+                logging.info("Getting next page... %s", items_url)
+                logging.info(json.dumps(items_body, indent=4))
             else:
-                print("Stopping at last page.")
+                logging.info("Stopping at last page.")
                 break
         return self._make_report()
 
@@ -97,11 +98,11 @@ class StacSelectiveIngesterViaPost:
         collection = collection_response.json()
         self._add_provider_to_collection(collection)
         self._remove_rels_from_links(collection)
-        collections_endpoint = f"{self.target_stac_api_url}/collections"
+        collections_endpoint = urljoin(self.target_stac_api_url, "/collections")
         try:
             response = requests.post(collections_endpoint, json=collection)
             response.raise_for_status()
-            print("Stored collection:", response.json()["id"])
+            logging.info("Stored collection: %s", response.json()["id"])
             self.newly_stored_collections_count += 1
             self.newly_stored_collections.append(source_stac_api_collection_url)
         except requests.exceptions.HTTPError as error:
@@ -109,46 +110,49 @@ class StacSelectiveIngesterViaPost:
                 error.response
                 and error.response.json().get("code") == "ConflictError"
             ):
-                print(
-                    f"Collection {collection['id']} already exists."
+                logging.info(
+                    "Collection %s already exists.", collection["id"]
                 )
                 response = requests.put(collections_endpoint, json=collection)
                 response.raise_for_status()
-                print("Updated collection:", response.json()["id"])
+                logging.info("Updated collection: %s", response.json()["id"])
                 self.updated_collections_count += 1
                 self.updated_collections.append(source_stac_api_collection_url)
             else:
-                print(f"Error storing collection {collection['id']}: {error}")
+                logging.error("Error storing collection %s: %s", collection["id"], error)
         self.processed_collections.append(source_stac_api_collection_url)
 
     def _store_item_into_target_stac_api(self, item, collection_id):
-        items_endpoint = f"{self.target_stac_api_url}/collections/{collection_id}/items"
+        items_endpoint = urljoin(
+            self.target_stac_api_url,
+            f"/collections/{collection_id}/items"
+        )
         try:
             response = requests.post(items_endpoint, json=item)
             response.raise_for_status()
-            print("Stored item:", response.json()["id"])
+            logging.info("Stored item: %s", response.json()["id"])
             self.newly_added_items_count += 1
             return f"Stored item: {response.json()['id']}"
         except requests.exceptions.HTTPError as error:
-            if (
-                error.response
-                and error.response.json().get("code") == "ConflictError"
-            ):
-                if not self.update:
-                    print(f"Item {item['id']} already exists.")
-                    self.items_already_present_count += 1
-                    return f"Item {item['id']} already exists."
-                else:
-                    response = requests.put(
-                        f"{items_endpoint}/{item['id']}", json=item
-                    )
-                    response.raise_for_status()
-                    self.updated_items_count += 1
-                    print("Updated item:", response.json()["id"])
-                    return f"Updated item: {response.json()['id']}"
+            # if (
+            #     error.response
+            #     and error.response.json().get("code") == "ConflictError"
+            # ):
+            if not self.update:
+                logging.info("Item %s already exists.", item["id"])
+                self.items_already_present_count += 1
+                return f"Item {item['id']} already exists."
             else:
-                print(f"Error storing item {item['id']}: {error}")
-                raise error
+                response = requests.put(
+                    f"{items_endpoint}/{item['id']}", json=item
+                )
+                response.raise_for_status()
+                self.updated_items_count += 1
+                logging.info("Updated item: %s", response.json()["id"])
+                return f"Updated item: {response.json()['id']}"
+            # else:
+            #     logging.error("Error storing item %s: %s", item["id"], error)
+            #     # raise error
 
     @staticmethod
     def _add_provider_to_collection(collection):
