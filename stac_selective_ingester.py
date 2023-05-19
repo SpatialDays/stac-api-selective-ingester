@@ -9,9 +9,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class StacSelectiveIngester:
     def __init__(
-        self, source_api_url, start_url, start_body, target_stac_api_url, update=False
+        self, source_stac_api_url, start_url, start_body, target_stac_api_url, update=False
     ):
-        self.source_api_url = source_api_url.rstrip("/")
+        self.source_api_url = source_stac_api_url.rstrip("/")
         self.start_url = start_url
         self.target_stac_api_url = target_stac_api_url.rstrip("/")
         self.update = update
