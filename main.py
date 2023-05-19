@@ -3,13 +3,15 @@ import json
 import redis
 import logging
 from stac_selective_ingester import StacSelectiveIngester
+from dotenv import load_dotenv
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-redis_host = os.getenv("REDIS_HOST", "localhost")
-redis_port = int(os.getenv("REDIS_PORT", 30000))
-redis_queue_key = os.getenv("REDIS_QUEUE_KEY", "stac_selective_ingester_queue")
+redis_host = os.getenv("REDIS_HOST")
+redis_port = int(os.getenv("REDIS_PORT"))
+redis_queue_key = "stac_selective_ingester_input_list"
 
 def process_request(json_payload):
     source_stac_api_url = json_payload.get("source_stac_catalog_url")
@@ -27,6 +29,11 @@ def process_request(json_payload):
     update = json_payload.get("update", False)
     logging.info("Update flag: %s", update)
 
+    callback_id = json_payload.get("callback_id")
+    if not callback_id:
+        raise Exception("Callback ID is required")
+    logging.info("Callback ID: %s", callback_id)
+
     url = f"{source_stac_api_url}/search"
     stac_search_parameters = json_payload.get("stac_search_parameters")
     stac_search_parameters["limit"] = 100
@@ -39,14 +46,18 @@ def process_request(json_payload):
         url,
         stac_search_parameters,
         target_stac_api_url,
-        update
+        update=update
     )
 
     try:
         result = stac_selective_ingester.get_all_items()
+        logging.info("Result: %s", result)
+        result["callback_id"] = callback_id
         return result
     except Exception as e:
-        return {"error": str(e)}
+        logging.error("Error: %s", str(e))
+        return {"error": str(e), 
+                "callback_id": callback_id}
 
 if __name__ == "__main__":
     redis_client = redis.Redis(host=redis_host, port=redis_port)
@@ -59,5 +70,5 @@ if __name__ == "__main__":
             _, request_body = item
             request_body = json.loads(request_body)
             result = process_request(request_body)
-            redis_client.rpush(redis_queue_key + "_results", json.dumps(result))
+            redis_client.rpush("stac_selective_ingester_output_list", json.dumps(result))
             logging.info("Processed request: %s", request_body)

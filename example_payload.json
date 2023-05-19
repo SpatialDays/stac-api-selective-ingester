@@ -2,6 +2,7 @@
   "source_stac_catalog_url": "https://earth-search.aws.element84.com/v0/",
   "target_stac_catalog_url": "http://localhost:8080",
   "update": true,
+  "callback_id": "1234",
   "stac_search_parameters": {
     "bbox": [-1, 50, 1, 51],
     "datetime": "2022-04-04T00:00:00Z/2022-05-05T00:00:00Z",
