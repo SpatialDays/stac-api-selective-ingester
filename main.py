@@ -1,58 +1,63 @@
-from flask import Flask, request, jsonify
-from functools import wraps
-from stac_selective_ingester_via_post import StacSelectiveIngesterViaPost
 import os
+import json
+import redis
+import logging
+from stac_selective_ingester import StacSelectiveIngester
 
-app = Flask(__name__)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def validate_request(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not request.json or "source_stac_catalog_url" not in request.json:
-            return jsonify({"error": "source_stac_catalog_url not found in body"}), 400
-        if not request.json or "target_stac_catalog_url" not in request.json:
-            return jsonify({"error": "target_stac_catalog_url not found in body"}), 400
-        return f(*args, **kwargs)
-    return decorated_function
+redis_host = os.getenv("REDIS_HOST", "localhost")
+redis_port = int(os.getenv("REDIS_PORT", 30000))
+redis_queue_key = os.getenv("REDIS_QUEUE_KEY", "stac_selective_ingester_queue")
 
-@app.route("/", methods=["POST"])
-@validate_request
-def process_request():
-    body = request.json
-    source_stac_api_url = body["source_stac_catalog_url"]
-    if source_stac_api_url.endswith("/"):
-        source_stac_api_url = source_stac_api_url[:-1]
-    del body["source_stac_catalog_url"]
-    print("Source STAC API URL:", source_stac_api_url)
+def process_request(json_payload):
+    source_stac_api_url = json_payload.get("source_stac_catalog_url")
+    if not source_stac_api_url:
+        raise Exception("Source STAC API URL is required")
+    source_stac_api_url = source_stac_api_url.rstrip("/")
+    logging.info("Source STAC API URL: %s", source_stac_api_url)
 
-    target_stac_api_url = body["target_stac_catalog_url"]
-    if target_stac_api_url.endswith("/"):
-        target_stac_api_url = target_stac_api_url[:-1]
-    del body["target_stac_catalog_url"]
-    print("Target STAC API URL:", target_stac_api_url)
+    target_stac_api_url = json_payload.get("target_stac_catalog_url")
+    if not target_stac_api_url:
+        raise Exception("Target STAC API URL is required")
+    target_stac_api_url = target_stac_api_url.rstrip("/")
+    logging.info("Target STAC API URL: %s", target_stac_api_url)
 
-    update = body.get("update", False)
-    del body["update"]
-    print("Update flag:", update)
+    update = json_payload.get("update", False)
+    logging.info("Update flag: %s", update)
 
     url = f"{source_stac_api_url}/search"
-    body["limit"] = 100
+    stac_search_parameters = json_payload.get("stac_search_parameters")
+    stac_search_parameters["limit"] = 100
+    
+    if not stac_search_parameters:
+        raise Exception("STAC search parameters are required")
 
-    stac_selective_ingester = StacSelectiveIngesterViaPost(
+    stac_selective_ingester = StacSelectiveIngester(
         source_stac_api_url,
         url,
-        body,
+        stac_search_parameters,
         target_stac_api_url,
         update
     )
 
     try:
         result = stac_selective_ingester.get_all_items()
-        return jsonify(result), 200
+        return result
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return {"error": str(e)}
 
 if __name__ == "__main__":
-    port = int(os.getenv("STAC_SELECTIVE_INGESTER_PORT", 7001))
-    app.run(host="0.0.0.0", port=port)
-    print("Listening on port", port)
+    redis_client = redis.Redis(host=redis_host, port=redis_port)
+    if redis_client.ping():
+        logging.info(f"Connected to Redis server at {redis_host}:{redis_port}")
+
+    while True:
+        item = redis_client.blpop(redis_queue_key, timeout=1)
+        if item:
+            _, request_body = item
+            request_body = json.loads(request_body)
+            result = process_request(request_body)
+            redis_client.rpush(redis_queue_key + "_results", json.dumps(result))
+            logging.info("Processed request: %s", request_body)
