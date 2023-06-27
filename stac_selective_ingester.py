@@ -96,6 +96,12 @@ class StacSelectiveIngester:
             return
         collection_response = requests.get(source_stac_api_collection_url)
         collection = collection_response.json()
+        stac_extensions = collection.get("stac_extensions", [])
+        stac_extensions.append("https://raw.githubusercontent.com/SpatialDays/sd-stac-extensions/main/spatialdays-stac-portal-metadata/v0.0.1/schema.json")
+        collection["stac_extensions"] = stac_extensions
+        collection["stac-portal-metadata"] = {
+            "type-of-collection": "public",
+        }
         self._add_provider_to_collection(collection)
         self._remove_rels_from_links(collection)
         collections_endpoint = urljoin(self.target_stac_api_url, "/collections")
@@ -143,16 +149,17 @@ class StacSelectiveIngester:
                 self.items_already_present_count += 1
                 return f"Item {item['id']} already exists."
             else:
-                response = requests.put(
-                    f"{items_endpoint}/{item['id']}", json=item
-                )
-                response.raise_for_status()
-                self.updated_items_count += 1
-                logging.info("Updated item: %s", response.json()["id"])
-                return f"Updated item: {response.json()['id']}"
-            # else:
-            #     logging.error("Error storing item %s: %s", item["id"], error)
-            #     # raise error
+                try:
+                    response = requests.put(
+                        f"{items_endpoint}/{item['id']}", json=item
+                    )
+                    response.raise_for_status()
+                    self.updated_items_count += 1
+                    logging.info("Updated item: %s", response.json()["id"])
+                    return f"Updated item: {response.json()['id']}"
+                except Exception as error:
+                    logging.error("Error updating item %s: %s", item["id"], error)
+                    return f"Error updating item {item['id']}: {error}"
 
     @staticmethod
     def _add_provider_to_collection(collection):
