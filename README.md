@@ -9,6 +9,8 @@ The search parameters can be passed through on an ingest request, together with 
 ## Environment Variables
 | Env var | Used for | Default |
 | --- | --- | --- |
+| REDIS_HOST| | |
+| REDIS_PORT| | |
 | STAC_API_SELECTIVE_INGESTER_PROVIDER_SET_HOST_PROVIDER | Set our details as an external provider for providers entry in the STAC record | `False` |
 | STAC_API_SELECTIVE_INGESTER_PROVIDER_NAME | Setting ourselves as the provider for the STAC API server entry | Spatial Days |
 | STAC_API_SELECTIVE_INGESTER_PROVIDER_URL | Our organization provider URL (i.e. organization website) | https://spatialdays.com/ |
