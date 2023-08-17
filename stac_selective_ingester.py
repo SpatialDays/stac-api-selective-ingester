@@ -5,11 +5,19 @@ import logging
 import json
 from urllib.parse import urljoin, urlparse
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 
 class StacSelectiveIngester:
     def __init__(
-        self, source_stac_api_url, start_url, start_body, target_stac_api_url, update=False
+        self,
+        source_stac_api_url,
+        start_url,
+        start_body,
+        target_stac_api_url,
+        update=False,
     ):
         self.source_api_url = source_stac_api_url.rstrip("/")
         self.start_url = start_url
@@ -74,11 +82,7 @@ class StacSelectiveIngester:
                     self._remove_rels_from_links(item)
                     self._store_item_into_target_stac_api(item, collection_id)
             next_item_set_link = next(
-                (
-                    link
-                    for link in data.get("links", [])
-                    if link["rel"] == "next"
-                ),
+                (link for link in data.get("links", []) if link["rel"] == "next"),
                 None,
             )
             if next_item_set_link:
@@ -97,7 +101,9 @@ class StacSelectiveIngester:
         collection_response = requests.get(source_stac_api_collection_url)
         collection = collection_response.json()
         stac_extensions = collection.get("stac_extensions", [])
-        stac_extensions.append("https://raw.githubusercontent.com/SpatialDays/sd-stac-extensions/main/spatialdays-stac-portal-metadata/v0.0.1/schema.json")
+        stac_extensions.append(
+            "https://raw.githubusercontent.com/SpatialDays/sd-stac-extensions/main/spatialdays-stac-portal-metadata/v0.0.1/schema.json"
+        )
         collection["stac_extensions"] = stac_extensions
         collection["stac-portal-metadata"] = {
             "type-of-collection": "public",
@@ -112,26 +118,22 @@ class StacSelectiveIngester:
             self.newly_stored_collections_count += 1
             self.newly_stored_collections.append(source_stac_api_collection_url)
         except requests.exceptions.HTTPError as error:
-            if (
-                error.response
-                and error.response.json().get("code") == "ConflictError"
-            ):
-                logging.info(
-                    "Collection %s already exists.", collection["id"]
-                )
+            if (error.response.status_code == 409):
+                logging.info("Collection %s already exists.", collection["id"])
+                self.updated_collections.append(source_stac_api_collection_url)
+                self.updated_collections_count += 1
                 response = requests.put(collections_endpoint, json=collection)
                 response.raise_for_status()
                 logging.info("Updated collection: %s", response.json()["id"])
-                self.updated_collections_count += 1
-                self.updated_collections.append(source_stac_api_collection_url)
             else:
-                logging.error("Error storing collection %s: %s", collection["id"], error)
+                logging.error(
+                    "Error storing collection %s: %s", collection["id"], error
+                )
         self.processed_collections.append(source_stac_api_collection_url)
 
     def _store_item_into_target_stac_api(self, item, collection_id):
         items_endpoint = urljoin(
-            self.target_stac_api_url,
-            f"/collections/{collection_id}/items"
+            self.target_stac_api_url, f"/collections/{collection_id}/items"
         )
         try:
             response = requests.post(items_endpoint, json=item)
@@ -150,9 +152,7 @@ class StacSelectiveIngester:
                 return f"Item {item['id']} already exists."
             else:
                 try:
-                    response = requests.put(
-                        f"{items_endpoint}/{item['id']}", json=item
-                    )
+                    response = requests.put(f"{items_endpoint}/{item['id']}", json=item)
                     response.raise_for_status()
                     self.updated_items_count += 1
                     logging.info("Updated item: %s", response.json()["id"])
@@ -176,7 +176,6 @@ class StacSelectiveIngester:
                     "roles": ["host"],
                 }
             )
-
 
     @staticmethod
     def _remove_rels_from_links(collection):
