@@ -107,6 +107,7 @@ class StacSelectiveIngester:
         collection["stac_extensions"] = stac_extensions
         collection["stac-portal-metadata"] = {
             "type-of-collection": "public",
+            "is-authoritative": False,
         }
         self._add_provider_to_collection(collection)
         self._remove_rels_from_links(collection)
